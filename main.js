@@ -41,7 +41,7 @@ let serv = http
 						});
 						res.end(JSON.stringify("OK"));
 						socketInitializer(post.urltarget);
-						top.setting.close()
+						top.setting.close();
 					});
 				}
 				break;
@@ -56,6 +56,7 @@ let serv = http
 
 let top = {
 	socket: null,
+	icons: null,
 }; // prevent gc to keep windows
 let state = "";
 
@@ -74,14 +75,13 @@ async function resetSocket() {
 	top.socket.removeAllListeners();
 	top.socket = null;
 	await resetTable();
-	showNotification(
-		"Websocket reset",
-		"Websocket instance successfuly reset by user"
-	);
 	console.log("reset database");
 }
 
 async function socketInitializer(url = null) {
+	top.tray.setImage(
+		nativeImage.createFromPath(path.resolve(__dirname, "img/connect.png"))
+	);
 	if (url == null) {
 		let row = await getRow;
 		url = row.url;
@@ -89,9 +89,8 @@ async function socketInitializer(url = null) {
 
 	top.socket = io(url);
 	top.socket.on("connect", () => {
-		showNotification(
-			"Websocket Connected!",
-			"Websocket connected successfully to host"
+		top.tray.setImage(
+			nativeImage.createFromPath(path.resolve(__dirname, "img/logo.png"))
 		);
 		console.log(top.socket.id); // x8WIv7-mJelg7on_ALbx
 		console.log("success");
@@ -105,90 +104,24 @@ async function socketInitializer(url = null) {
 	let iterator_error = 0;
 
 	top.socket.on("connect_error", (err) => {
+		top.tray.setImage(
+			nativeImage.createFromPath(path.resolve(__dirname, "img/error.png"))
+		);
 		console.log(err);
 		iterator_error++;
 		if (iterator_error > 3) {
 			return resetSocket();
-		}	
-		showNotification(
-			"Websocket Error",
-			`Trying to connect again (x${iterator_error})`
-		);
+		}
 	});
 }
 
-app.once("ready", async (ev) => {
-	let autoLaunch = new AutoLaunch({
-		name: "HIMTI",
-		path: app.getPath("exe"),
-	});
-
-	autoLaunch.isEnabled().then((isEnabled) => {
-		if (!isEnabled) autoLaunch.enable();
-	});
-
-	let jumlah = await getRowCount;
-	console.log(jumlah);
-
-	if (jumlah) {
-		await socketInitializer();
-	} else {
-		showSetting();
-	}
-	setInterval(() => {
-		if (top.socket != null) {
-			top.socket.emit("pc-update", {
-				uptime: os.uptime(),
-				state: state,
-			});
-		}
-	}, 5000);
-
-	const win = new BrowserWindow({
-		width: 800,
-		height: 600,
-		center: true,
-		minimizable: false,
-		show: false,
-		webPreferences: {
-			nodeIntegration: false,
-			webSecurity: true,
-			sandbox: true,
-		},
-	});
-	console.log(path.resolve(__dirname, "img/logo.png"))
-	const tray = new Tray(nativeImage.createFromPath(path.resolve(__dirname, "img/logo.png")));
-
-	const icons = new BrowserWindow({
-		show: false,
-		webPreferences: { offscreen: true },
-	});
-
-	top.win = win;
-	top.win.loadURL("https://google.com/");
-	top.win.on("close", (ev) => {
-		//console.log(ev);
-		ev.sender.hide();
-		ev.preventDefault(); // prevent quit process
-	});
-
-	function showSetting() {
-		top.setting = new BrowserWindow({
-			width: 800,
-			height: 600,
-		});
-
-		top.setting.loadFile("./form.html");
-		top.setting.on("close", (ev) => {
-			//console.log(ev);
-			ev.sender.hide();
-			ev.preventDefault(); // prevent quit process
-		});
-	}
-
-	// empty image as transparent icon: it can click
-	// see: https://electron.atom.io/docs/api/tray/
+function trayMaker() {
+	// TRAY INSTANCE
+	const tray = new Tray(
+		nativeImage.createFromPath(path.resolve(__dirname, "img/logo.png"))
+	);
 	top.tray = tray;
+	top.tray.setToolTip("Lab Status");
 	const menu = Menu.buildFromTemplate([
 		{
 			label: "Setting",
@@ -203,18 +136,60 @@ app.once("ready", async (ev) => {
 		{ type: "separator" },
 		{ role: "quit" }, // "role": system prepared action menu
 	]);
-	top.tray.setToolTip("Lab Status");
 	//top.tray.setTitle("Tray Example"); // macOS only
 	top.tray.setContextMenu(menu);
+}
 
-	// Option: some animated web site to tray icon image
-	// see: https://electron.atom.io/docs/tutorial/offscreen-rendering/
-	top.icons = icons;
-	// top.icons.loadURL("https://trends.google.com/trends/hottrends/visualize");
-	// top.icons.webContents.on("paint", (event, dirty, image) => {
-	//   if (top.tray) top.tray.setImage(image.resize({ width: 16, height: 16 }));
-	// });
+function showSetting() {
+	if (!top.setting) {
+		top.setting = new BrowserWindow({
+			width: 800,
+			height: 600,
+		});
+
+		top.setting.loadFile("./form.html");
+		top.setting.on("close", (ev) => {
+			top.setting = null;
+			//console.log(ev);
+			ev.sender.hide();
+			ev.preventDefault(); // prevent quit process
+		});
+	}
+}
+
+app.once("ready", async (ev) => {
+	let autoLaunch = new AutoLaunch({
+		name: "HIMTI",
+		path: app.getPath("exe"),
+	});
+
+	autoLaunch.isEnabled().then((isEnabled) => {
+		if (!isEnabled) autoLaunch.enable();
+	});
+
+	trayMaker();
+
+	let jumlah = await getRowCount;
+	console.log(jumlah);
+
+	if (jumlah) {
+		await socketInitializer();
+	} else {
+		top.tray.setImage(
+			nativeImage.createFromPath(path.resolve(__dirname, "img/error.png"))
+		);
+		await socketInitializer("https://status.himti.id");
+	}
+	setInterval(() => {
+		if (top.socket != null) {
+			top.socket.emit("pc-update", {
+				uptime: os.uptime(),
+				state: state,
+			});
+		}
+	}, 5000);
 });
+
 app.on("before-quit", (ev) => {
 	// BrowserWindow "close" event spawn after quit operation,
 	// it requires to clean up listeners for "close" event
@@ -224,6 +199,3 @@ app.on("before-quit", (ev) => {
 	db.close();
 });
 
-module.exports = {
-	socketInitializer,
-};
